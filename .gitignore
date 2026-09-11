@@ -1,0 +1,14 @@
+# Entornos virtuales (no se suben al repositorio)
+.venv/
+venv/
+src/.venv/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+
+# Checkpoints de Jupyter
+.ipynb_checkpoints/
+
+# Archivos temporales de Word
+~$*.docx

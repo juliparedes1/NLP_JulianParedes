@@ -39,6 +39,7 @@ src/
   scraper_lectulandia_colab.ipynb     # versión para Google Colab
 data/
   libros.csv                          # dataset final (entregable)
+  libros.json                         # mismo dataset, con arrays nativos
   libros_parcial.csv                  # guardado incremental (intermedio)
 docs/
   diseno_extraccion.md                # Parte 1: análisis previo
@@ -49,19 +50,42 @@ docs/
 
 ## Campos del dataset
 
-| Campo | Descripción |
-|---|---|
-| `titulo` | Título del libro |
-| `autores` | Autor o autores, separados por `; ` |
-| `generos` | Género o géneros, separados por `; ` |
-| `serie` | Serie a la que pertenece, si corresponde |
-| `sinopsis` | Texto completo de la sinopsis |
-| `url_libro` | Dirección de la ficha (clave del dataset) |
-| `categoria_origen` | Categoría seleccionada por el grupo |
-| `fecha_extraccion` | Fecha en que se obtuvo el registro |
-| `url_portada` | Dirección de la imagen de portada (campo opcional) |
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `titulo` | texto | Título del libro |
+| `autores` | **lista** | Autor o autores |
+| `generos` | **lista** | Género o géneros |
+| `serie` | texto | Serie a la que pertenece, si corresponde |
+| `sinopsis` | texto | Texto completo de la sinopsis |
+| `url_libro` | texto | Dirección de la ficha (clave del dataset) |
+| `categoria_origen` | texto | Categoría seleccionada por el grupo |
+| `fecha_extraccion` | texto | Fecha en que se obtuvo el registro (`AAAA-MM-DD`) |
+| `url_portada` | texto | Dirección de la imagen de portada (campo opcional) |
 
-Los campos ausentes se representan siempre con la cadena vacía.
+`autores` y `generos` son listas porque un libro puede tener varios. En `libros.csv`
+cada celda guarda un array JSON, por ejemplo `["Javier Cosnava", "Teresa Ortiz-Tagle"]`;
+en `libros.json` son arrays nativos.
+
+Los campos ausentes se representan siempre igual: `""` en los de texto y `[]` en los
+de lista.
+
+### Cómo leer el dataset
+
+Desde el CSV, recuperando las listas:
+
+```python
+import json
+import pandas as pd
+
+df = pd.read_csv("data/libros.csv", keep_default_na=False,
+                 converters={"autores": json.loads, "generos": json.loads})
+```
+
+Desde el JSON, donde las listas ya vienen como listas:
+
+```python
+df = pd.read_json("data/libros.json")
+```
 
 ---
 
@@ -115,11 +139,17 @@ playwright install chromium
 
 `Entorno de ejecución → Ejecutar todo`. El notebook instala las dependencias,
 recorre la categoría, arma el dataset, verifica los controles mínimos y descarga
-`libros.csv`.
+`libros.csv` y `libros.json`.
 
 La corrida completa tarda entre **6 y 10 minutos** para 100 libros, por las pausas
 entre visitas. Si la sesión se interrumpe, basta con volver a ejecutar la celda de
 scraping: el proceso retoma desde lo ya guardado en `data/libros_parcial.csv`.
+
+En la celda de configuración:
+
+* `N_LIBROS_OBJETIVO = 10` hace una **corrida de prueba** (el control de cantidad se
+  omite en lugar de fallar).
+* `REINICIAR = True` borra el CSV parcial y extrae todo de nuevo.
 
 ### Desde la línea de comandos
 
@@ -129,10 +159,17 @@ Extraer 100 libros (valor por defecto):
 python src/scraper.py
 ```
 
-Extraer otra cantidad:
+Corrida de prueba con 10 libros (el control de cantidad se omite en lugar de fallar):
 
 ```bash
-python src/scraper.py --n 60
+python src/scraper.py --n 10
+```
+
+Borrar el CSV parcial y extraer todo de nuevo (necesario después de cambiar el código
+de extracción, porque si no el programa retoma y no vuelve a visitar lo ya guardado):
+
+```bash
+python src/scraper.py --reiniciar
 ```
 
 Ver el navegador mientras trabaja (útil para depurar los selectores):
@@ -158,10 +195,14 @@ El programa verifica automáticamente, antes de exportar:
 - [x] Todos los registros tienen una URL válida
 - [x] Más del 80 % de los registros tiene sinopsis
 - [x] No quedan espacios ni saltos de línea innecesarios
-- [x] Los campos ausentes se representan de manera consistente (siempre `""`)
-- [x] La cantidad obtenida está entre 50 y 100 libros
+- [x] Los campos ausentes se representan de manera consistente (`""` o `[]`)
+- [x] La cantidad obtenida está entre 50 y 100 libros (se omite en corridas de prueba)
 
-Si alguno falla, la ejecución se detiene en lugar de generar un CSV defectuoso.
+Si alguno falla, el programa indica **cuál** no se cumple.
+
+Además informa dos **advertencias de calidad**, que no bloquean la entrega: sinopsis
+con oraciones pegadas (`"hacerlo.Respeto"`) y portadas repetidas entre libros
+distintos.
 
 ---
 
@@ -202,6 +243,27 @@ Si alguno falla, la ejecución se detiene en lugar de generar un CSV defectuoso.
 8. **Riesgo de perder una corrida larga.** Extraer 100 libros lleva varios minutos y
    Colab puede desconectarse. Se implementó el guardado incremental más la
    reanudación automática a partir del CSV parcial.
+
+9. **Aviso de controles en la corrida de prueba.** Una prueba con 10 libros terminó
+   con *"hay controles mínimos que no se cumplen"*, sin decir cuál. El único que
+   fallaba era el de cantidad (rango 50–100), esperable en una prueba. Se agregó un
+   modo prueba que omite ese control, y el mensaje final ahora nombra los controles
+   que fallan.
+
+10. **Portadas de otro libro.** En esa misma prueba, 9 de 10 libros tenían la portada
+    de *Misteriosa noche de paz*: el selector de respaldo `article img` tomaba la
+    imagen de otro bloque de la página. Ningún control lo detectaba. Ahora la portada
+    sólo se acepta si su dirección contiene el título del libro; si no, queda vacía.
+
+11. **Oraciones pegadas en las sinopsis.** El sitio separa los renglones con `<br>`, y
+    `get_text()` los pegaba: `"hacerlo.Respeto"`, `"navidad?19 de diciembre"` (28
+    casos en 8 de 10 libros). Para el procesamiento de texto es grave, porque el
+    tokenizador ve una sola palabra. Se convierten los `<br>` en espacios antes de
+    extraer el texto, y se agregó una advertencia que detecta el patrón.
+
+12. **Listas en un CSV.** Al pasar `autores` y `generos` a listas, hubo que
+    serializarlas como JSON (un CSV sólo guarda texto) y adaptar la deduplicación:
+    pandas no puede comparar listas con `drop_duplicates` porque no son "hasheables".
 
 ---
 

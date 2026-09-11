@@ -28,8 +28,8 @@ Extracción de metadatos y sinopsis con Playwright y BeautifulSoup
 | Campo | Descripción | Tipo | Obligatorio |
 |---|---|---|---|
 | `titulo` | Título del libro | texto | Sí |
-| `autores` | Autor o autores, separados por `; ` | texto | No |
-| `generos` | Género o géneros, separados por `; ` | texto | No |
+| `autores` | Autor o autores | **lista** (array) | No |
+| `generos` | Género o géneros | **lista** (array) | No |
 | `serie` | Serie a la que pertenece, si corresponde | texto | No |
 | `sinopsis` | Texto completo de la sinopsis | texto | No |
 | `url_libro` | Dirección de la ficha | URL | Sí (clave) |
@@ -39,10 +39,15 @@ Extracción de metadatos y sinopsis con Playwright y BeautifulSoup
 
 **Convenciones del dataset**
 
-* Los campos con varios valores (`autores`, `generos`) se guardan en una sola celda
-  unidos por `"; "`. No se usa la coma porque es el separador del CSV.
-* Los campos ausentes se representan **siempre** con la cadena vacía (`""`), nunca con
-  `None`, `NaN`, `"N/A"` ni `"-"`.
+* Los campos con varios valores (`autores`, `generos`) son **listas**. En
+  `libros.csv` cada celda guarda un **array JSON**, por ejemplo
+  `["Javier Cosnava", "Teresa Ortiz-Tagle"]`; en `libros.json` se guardan como arrays
+  nativos. Se eligió JSON (y no un texto unido por `"; "`) porque es un formato
+  estándar, sin ambigüedad sobre el separador, que se lee directamente con
+  `json.loads`.
+* Los campos ausentes se representan **siempre** igual: la cadena vacía (`""`) en
+  los campos de texto y la lista vacía (`[]`) en los de lista. Nunca `None`, `NaN`,
+  `"N/A"` ni `"-"`.
 * Todo el texto se normaliza: sin saltos de línea, sin espacios dobles y sin espacios
   al principio ni al final.
 * `url_libro` es la **clave** del dataset: no puede haber dos registros con el mismo valor.
@@ -77,11 +82,11 @@ de modo que `/book/x/?utm=1`, `/book/x/#comentarios` y `/book/x/` cuenten como u
 | Dato | Tipo de página | Etiqueta HTML | Selector propuesto |
 |---|---|---|---|
 | **Título** | Ficha individual | `<div id="title"><h1>TÍTULO</h1></div>` | `div#title` → `.get_text()` · *plan B:* primer `h1` de la página |
-| **Autores** | Ficha individual | `<div id="autor" class="realign"><span class="tagTitle">Autor: </span><a class="dinSource" href="/autor/david-mccloskey/" rel="tag">AUTOR</a></div>` | `div#autor a.dinSource` → texto de cada `<a>`, unidos con `"; "` |
-| **Géneros** | Ficha individual | `<div id="genero" class="realign"><span class="tagTitle">Generos: </span><a class="dinSource" href="/genero/intriga/" rel="tag">Intriga</a> &nbsp; <a class="dinSource" href="/genero/novela/" rel="tag">Novela</a></div>` | `div#genero a.dinSource` → texto de cada `<a>`, unidos con `"; "` |
+| **Autores** | Ficha individual | `<div id="autor" class="realign"><span class="tagTitle">Autor: </span><a class="dinSource" href="/autor/david-mccloskey/" rel="tag">AUTOR</a></div>` | `div#autor a` → **lista** con el texto de cada `<a>`, sin repetidos |
+| **Géneros** | Ficha individual | `<div id="genero" class="realign"><span class="tagTitle">Generos: </span><a class="dinSource" href="/genero/intriga/" rel="tag">Intriga</a> &nbsp; <a class="dinSource" href="/genero/novela/" rel="tag">Novela</a></div>` | `div#genero a` → **lista** con el texto de cada `<a>`, sin repetidos |
 | **Serie** | Ficha individual | `<div id="serie" class="realign">…</div>` (no está en todas las fichas) | `div#serie a` → texto; si no hay enlaces, texto plano del `div`; si el `div` no existe, `""` |
-| **Sinopsis** | Ficha individual | `<div id="sinopsis" class="realign"><span>Sinopsis</span><p>…</p></div>` | `div#sinopsis p` → texto de cada `<p>` unido con espacios · *plan B:* `meta[name="description"]` |
-| **Portada** *(opcional)* | Ficha individual | `<img src="…">` dentro del bloque de portada | `div#cover img, .thumbnail img, article img` → atributo `src`, vuelto absoluto |
+| **Sinopsis** | Ficha individual | `<div id="sinopsis" class="realign"><span>Sinopsis</span> Renglón 1.<br>Renglón 2.</div>` | `div#sinopsis` → texto completo, convirtiendo cada `<br>` y cada bloque (`<p>`, `<div>`…) en un espacio · *plan B:* `meta[name="description"]` |
+| **Portada** *(opcional)* | Ficha individual | `<meta property="og:image">` o `<img src="…">` | `meta[property="og:image"]` y luego cada `img`: se acepta **sólo** la imagen cuya dirección o `alt` contiene el título del libro; si ninguna coincide, `""` |
 
 **Tratamiento del rótulo.** Los bloques `#autor` y `#genero` incluyen una etiqueta
 descriptiva dentro de `<span class="tagTitle">` (`"Autor: "`, `"Generos: "`). Si se
@@ -93,6 +98,21 @@ leyera el `div` completo, ese rótulo quedaría dentro del dato
 otro maquetado: el título cae en el primer `<h1>` de la página, y la sinopsis en la
 etiqueta `<meta name="description">`. Así una ficha con estructura distinta se
 recupera igual en lugar de perderse.
+
+### 3.3 Ajustes tras la prueba parcial (versión 2)
+
+Una prueba con 10 libros mostró dos problemas de localización que obligaron a
+corregir los selectores propuestos originalmente:
+
+| Dato | Selector original | Problema observado | Selector corregido |
+|---|---|---|---|
+| Portada | `div#cover img, .thumbnail img, article img` | 9 de 10 libros recibieron la portada de otro libro: `article img` coincidía primero con una imagen de otro bloque de la página. | Se valida cada imagen contra el título del libro (ver tabla 3.2). |
+| Sinopsis | `div#sinopsis p`, unidos con espacios | 28 oraciones pegadas en 8 de 10 libros (`"hacerlo.Respeto"`): el sitio separa los renglones con `<br>`, no con `<p>`. | Texto completo del `div`, convirtiendo `<br>` y bloques en espacios. |
+
+**Lección de diseño:** un selector de respaldo genérico que puede coincidir con
+datos de **otro** registro es peor que no tener respaldo, porque el error no se ve.
+Los planes B del título y la sinopsis siguen siendo seguros: el primer `<h1>` y la
+etiqueta `meta description` siempre describen la página actual.
 
 ---
 
@@ -117,14 +137,23 @@ recupera igual en lugar de perderse.
 7. **Extraer los metadatos y la sinopsis con BeautifulSoup**, según los selectores
    de la sección 3.
 8. **Limpiar y validar los datos.** Se colapsan espacios y saltos de línea, se
-   convierten los espacios duros (`&nbsp;`) en espacios normales y se descartan las
-   fichas que quedaron sin título.
+   convierten los espacios duros (`&nbsp;`) en espacios normales, se descartan las
+   fichas que quedaron sin título y se vacía toda portada que no corresponda a su
+   libro.
 9. **Eliminar libros duplicados.** Durante la corrida, mediante un conjunto de URL ya
    visitadas; al final, con una doble deduplicación por `url_libro` y por la
    combinación `titulo` + `autores`.
 10. **Guardar el resultado en un archivo CSV.** La escritura es **incremental**: cada
     libro se guarda apenas se obtiene, de modo que una desconexión no haga perder el
-    trabajo ya hecho. Al terminar se arma el `data/libros.csv` definitivo.
+    trabajo ya hecho. Al terminar se arma el `data/libros.csv` definitivo (con los
+    campos de lista como arrays JSON) y una copia `data/libros.json` con arrays
+    nativos.
+
+**Corridas de prueba.** Para validar los selectores antes de la corrida completa se
+puede extraer una cantidad menor (por ejemplo 10 libros). En ese caso el control de
+cantidad se informa como omitido en lugar de fallar. Como el programa retoma desde el
+CSV parcial, después de corregir el código hay que volver a extraer desde cero
+(`--reiniciar`).
 
 ### Manejo de errores
 
@@ -153,9 +182,19 @@ ejecución se detiene en lugar de generar un CSV defectuoso.
 | Todos los registros tienen título | `(df["titulo"].str.len() > 0).all()` |
 | Todos los registros tienen una URL válida | `df["url_libro"].str.match(r"^https?://").all()` |
 | La mayoría de los registros tiene sinopsis | proporción de sinopsis no vacías `> 80 %` |
-| Se eliminaron espacios y saltos de línea innecesarios | ninguna celda con `\n`, espacios dobles ni espacios en los extremos |
-| Los campos ausentes se representan de manera consistente | `df.isna().sum().sum() == 0` (siempre `""`) |
-| La cantidad obtenida está entre 50 y 100 libros | `50 <= len(df) <= 100` |
+| Se eliminaron espacios y saltos de línea innecesarios | ninguna celda (ni ningún elemento de las listas) con `\n`, espacios dobles ni espacios en los extremos |
+| Los campos ausentes se representan de manera consistente | los campos de texto contienen sólo `str` (ausente = `""`) y los de lista sólo `list` (ausente = `[]`) |
+| La cantidad obtenida está entre 50 y 100 libros | `50 <= len(df) <= 100` (se omite en corridas de prueba de menos de 50 libros) |
+
+Si algún control falla, el programa indica **por nombre** cuál no se cumple.
+
+**Advertencias de calidad** (no bloquean la entrega, pero detectan errores que los
+controles mínimos no ven):
+
+| Advertencia | Cómo se verifica |
+|---|---|
+| Sinopsis sin oraciones pegadas | ninguna coincidencia del patrón minúscula + `.?!…` + mayúscula/número sin espacio (`"hacerlo.Respeto"`) |
+| Portadas sin repetir entre libros | ninguna `url_portada` repetida entre libros distintos |
 
 ---
 

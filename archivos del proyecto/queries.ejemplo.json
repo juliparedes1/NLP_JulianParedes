@@ -1,0 +1,30 @@
+[
+  {
+    "id": "q01",
+    "consulta": "un detective investiga un asesinato ocurrido en un hospital",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/misteriosa-noche-de-paz/"
+    ],
+    "tipo": "lexica",
+    "nota": "PLANTILLA. Usa palabras que aparecen textualmente en la sinopsis."
+  },
+  {
+    "id": "q02",
+    "consulta": "una escritora famosa en el centro de un misterio",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/hundida/",
+      "https://ww3.lectulandia.co/book/la-extincion-de-irena-rey/"
+    ],
+    "tipo": "lexica",
+    "nota": "PLANTILLA."
+  },
+  {
+    "id": "q03",
+    "consulta": "alguien finge ser quien no es para acercarse a su presa",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/el-novio/"
+    ],
+    "tipo": "semantica",
+    "nota": "PLANTILLA. Sin solapamiento lexico: TF-IDF saca 0 por construccion."
+  }
+]

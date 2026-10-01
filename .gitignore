@@ -12,3 +12,16 @@ __pycache__/
 
 # Archivos temporales de Word
 ~$*.docx
+
+# Modelos pre-entrenados y vectores (pesan cientos de MB: NO van al repositorio)
+*.bin
+*.bin.gz
+*.txt.bz2
+*.vec
+*.part
+*.npy
+embeddings/
+data/SBW-*
+modelos/
+!modelos/LEEME.txt
+sbw_vectors.bin

@@ -12,3 +12,21 @@ beautifulsoup4>=4.12
 lxml>=5.0
 pandas>=2.1
 nest_asyncio>=1.6      # solo necesario dentro de Google Colab
+
+
+# --------------------------------------------------------------------------- #
+# Unidad 2 - Representacion vectorial de texto (TP2)
+# --------------------------------------------------------------------------- #
+# NO fijar numpy==1.23.5 como hace el apunte de la Unidad 2: ese numpy no
+# convive con sentence-transformers, y este TP usa gensim y sentence-transformers
+# en el mismo notebook. Va gensim>=4.3.3 con el numpy que trae Colab.
+
+# gensim 4.4.0 es la primera version con wheel para Python 3.13, y la primera
+# que no limita scipy a <1.14. Con Python 3.13 hay que usar 4.4.0 o superior.
+gensim>=4.4.0              # Word2Vec / FastText propios (Parte B)
+sentence-transformers>=3.0 # modelo de oracion SBERT (Parte C)
+scikit-learn>=1.4          # TF-IDF, PCA, t-SNE, metricas (Partes D y 5)
+matplotlib>=3.8            # proyeccion 2D (Parte D)
+psycopg[binary]>=3.1       # conexion a Postgres/Supabase (Partes E y F)
+pgvector>=0.2              # tipo `vector` para psycopg
+python-dotenv>=1.0         # credenciales fuera del notebook (requisito de la consigna)

@@ -41,8 +41,8 @@ BASE_URL = "https://ww3.lectulandia.co"
 CATEGORIA_NOMBRE = "Thriller / Intriga"
 CATEGORIA_URL = "https://ww3.lectulandia.co/genero/intriga/"
 
-N_LIBROS_OBJETIVO = 100          # cantidad a extraer en la corrida de entrega
-MIN_LIBROS, MAX_LIBROS = 50, 100 # rango exigido por la consigna (Parte 2)
+N_LIBROS_OBJETIVO = 150          # cantidad a extraer en la corrida de entrega
+MIN_LIBROS, MAX_LIBROS = 100, 150 # rango exigido por la consigna (Parte 2)
 MAX_PAGINAS = 25                 # tope de paginas de listado a recorrer
 PAUSA_MIN, PAUSA_MAX = 1.5, 3.0  # pausa aleatoria entre visitas, en segundos
 TIMEOUT_MS = 45_000              # tiempo maximo de espera por pagina
@@ -567,3 +567,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+

@@ -1,0 +1,226 @@
+[
+  {
+    "id": "q01",
+    "consulta": "un detective investiga un asesinato en una casa de campo inglesa llena de sospechosos",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/el-misterio-de-la-casa-roja-ed-circulo-del-crimen/",
+      "https://ww3.lectulandia.co/book/la-casa-de-los-extranos-huespedes/",
+      "https://ww3.lectulandia.co/book/la-isla-de-los-crimenes/",
+      "https://ww3.lectulandia.co/book/misteriosa-noche-de-paz/"
+    ],
+    "titulos_relevantes": [
+      "El misterio de la casa roja (Ed. Círculo del crimen)",
+      "La casa de los extraños huéspedes",
+      "La isla de los crímenes",
+      "Misteriosa noche de paz"
+    ],
+    "tipo": "lexica",
+    "nota": "Caso clasico de mansion cerrada. Comparte vocabulario directo con las sinopsis."
+  },
+  {
+    "id": "q02",
+    "consulta": "Hércules Poirot y Agatha Christie resuelven un caso",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/misteriosa-noche-de-paz/",
+      "https://ww3.lectulandia.co/book/yo-no-soy-sherlock-holmes/",
+      "https://ww3.lectulandia.co/book/agatha-se-cita-con-la-muerte/"
+    ],
+    "titulos_relevantes": [
+      "Misteriosa noche de paz",
+      "Yo no soy Sherlock Holmes",
+      "Agatha se cita con la muerte"
+    ],
+    "tipo": "lexica",
+    "nota": "Consulta por nombres propios: el mejor escenario posible para TF-IDF."
+  },
+  {
+    "id": "q03",
+    "consulta": "una pareja de aristócratas ingleses investiga crímenes en el Londres de los años veinte",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/el-enigma-romano/",
+      "https://ww3.lectulandia.co/book/el-caso-frio-misterioso/",
+      "https://ww3.lectulandia.co/book/asesinato-en-el-parlamento/",
+      "https://ww3.lectulandia.co/book/doble-juego-mortal/",
+      "https://ww3.lectulandia.co/book/muerte-encubierta/",
+      "https://ww3.lectulandia.co/book/se-ha-espiado-un-crimen/"
+    ],
+    "titulos_relevantes": [
+      "El enigma romano",
+      "El caso frío misterioso",
+      "Asesinato en el Parlamento",
+      "Doble juego mortal",
+      "Muerte encubierta",
+      "Se ha espiado un crimen"
+    ],
+    "tipo": "mixta",
+    "nota": "Serie Dora & Rex. Sirve para ver si los modelos agrupan una saga."
+  },
+  {
+    "id": "q04",
+    "consulta": "un chico desaparece y el caso se reabre décadas después",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/corazon-de-perro-alvaro-garcia-hernandez/",
+      "https://ww3.lectulandia.co/book/48-pistas-sobre-la-desaparicion-de-mi-hermana/",
+      "https://ww3.lectulandia.co/book/el-silencio-del-bosque-jess-lourey/",
+      "https://ww3.lectulandia.co/book/en-mitad-de-la-noche/"
+    ],
+    "titulos_relevantes": [
+      "Corazón de perro",
+      "48 pistas sobre la desaparición de mi hermana",
+      "El silencio del bosque",
+      "En mitad de la noche"
+    ],
+    "tipo": "lexica",
+    "nota": "Desaparicion antigua reabierta en el presente."
+  },
+  {
+    "id": "q05",
+    "consulta": "un espía se infiltra en una organización para descubrir a un traidor",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/el-lago-de-la-creacion/",
+      "https://ww3.lectulandia.co/book/las-horas-secretas/",
+      "https://ww3.lectulandia.co/book/la-caza-del-ejecutor/",
+      "https://ww3.lectulandia.co/book/locura-y-razon/",
+      "https://ww3.lectulandia.co/book/muerte-encubierta/"
+    ],
+    "titulos_relevantes": [
+      "El lago de la creación",
+      "Las horas secretas",
+      "La caza del ejecutor",
+      "Locura y razón",
+      "Muerte encubierta"
+    ],
+    "tipo": "mixta",
+    "nota": "Espionaje. Ojo: q03 tambien incluye el 37, es un solapamiento deliberado."
+  },
+  {
+    "id": "q06",
+    "consulta": "una forense examina un cadáver en la sala de autopsias",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/noche-letal/",
+      "https://ww3.lectulandia.co/book/autopsia/",
+      "https://ww3.lectulandia.co/book/el-silencio-del-bosque-jess-lourey/",
+      "https://ww3.lectulandia.co/book/la-institucion/"
+    ],
+    "titulos_relevantes": [
+      "Noche letal",
+      "Autopsia",
+      "El silencio del bosque",
+      "La Institución"
+    ],
+    "tipo": "lexica",
+    "nota": "Vocabulario tecnico forense."
+  },
+  {
+    "id": "q07",
+    "consulta": "un crimen ocurrido en las Islas Canarias",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/mate-de-dos-alfiles/",
+      "https://ww3.lectulandia.co/book/bacon/",
+      "https://ww3.lectulandia.co/book/el-susurro-del-fuego/",
+      "https://ww3.lectulandia.co/book/la-huesped-de-la-casa-amarilla/",
+      "https://ww3.lectulandia.co/book/el-secreto-de-la-indiana/"
+    ],
+    "titulos_relevantes": [
+      "Mate de dos alfiles",
+      "Bacon",
+      "El susurro del fuego",
+      "La huésped de la Casa Amarilla",
+      "El secreto de La Indiana"
+    ],
+    "tipo": "lexica",
+    "nota": "Consulta geografica: el lugar esta escrito en la sinopsis."
+  },
+  {
+    "id": "q08",
+    "consulta": "una escritora famosa en el centro de un misterio",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/hundida/",
+      "https://ww3.lectulandia.co/book/la-extincion-de-irena-rey/",
+      "https://ww3.lectulandia.co/book/la-chica-del-lago-mikel-santiago/",
+      "https://ww3.lectulandia.co/book/el-invierno-llego-sin-avisar/"
+    ],
+    "titulos_relevantes": [
+      "Hundida",
+      "La extinción de Irena Rey",
+      "La chica del lago",
+      "El invierno llegó sin avisar"
+    ],
+    "tipo": "mixta",
+    "nota": "Mundo literario. Parte del vocabulario coincide, parte no."
+  },
+  {
+    "id": "q09",
+    "consulta": "un individuo que elige a sus presas y repite el mismo patrón",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/el-novio/",
+      "https://ww3.lectulandia.co/book/despidete/",
+      "https://ww3.lectulandia.co/book/la-otra-bella-durmiente/",
+      "https://ww3.lectulandia.co/book/por-causa-de-locura/",
+      "https://ww3.lectulandia.co/book/no-tengas-miedo/"
+    ],
+    "titulos_relevantes": [
+      "El novio",
+      "Despídete",
+      "La otra bella durmiente",
+      "Por causa de locura",
+      "No tengas miedo"
+    ],
+    "tipo": "semantica",
+    "nota": "SIN SOLAPAMIENTO: describe un asesino en serie sin usar 'asesino', 'serie', 'victima' ni 'matar'. TF-IDF no puede ganar por construccion."
+  },
+  {
+    "id": "q10",
+    "consulta": "una persona lastimada se cobra aquello que le arrebataron",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/ze/",
+      "https://ww3.lectulandia.co/book/la-linea-de-la-venganza/",
+      "https://ww3.lectulandia.co/book/defectos-perfectos-alice-feeney/",
+      "https://ww3.lectulandia.co/book/no-tengas-miedo/"
+    ],
+    "titulos_relevantes": [
+      "Ze",
+      "La línea de la venganza",
+      "Defectos perfectos",
+      "No tengas miedo"
+    ],
+    "tipo": "semantica",
+    "nota": "SIN SOLAPAMIENTO (0/5 tokens): describe venganza sin usar 'venganza', 'vengar' ni 'matar'. Redactada con ortografia correcta: el cero es distancia semantica real, no un error de tipeo."
+  },
+  {
+    "id": "q11",
+    "consulta": "objetos de gran valor que cambian de manos por medios turbios",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/muerte-en-rook-hall/",
+      "https://ww3.lectulandia.co/book/el-hermoso-marco-de-oro/",
+      "https://ww3.lectulandia.co/book/dejame-en-las-sombras/",
+      "https://ww3.lectulandia.co/book/el-secuestro-de-trent/"
+    ],
+    "titulos_relevantes": [
+      "Muerte en Rook Hall",
+      "El hermoso marco de oro",
+      "Déjame en las sombras",
+      "El secuestro de Trent"
+    ],
+    "tipo": "semantica",
+    "nota": "SIN SOLAPAMIENTO: describe robo sin usar 'robo', 'ladron' ni 'robado'."
+  },
+  {
+    "id": "q12",
+    "consulta": "un incendio destruye un edificio y entre los restos aparece un cuerpo",
+    "relevantes": [
+      "https://ww3.lectulandia.co/book/a-la-sombra-de-la-tormenta/",
+      "https://ww3.lectulandia.co/book/la-educacion-de-las-mariposas/",
+      "https://ww3.lectulandia.co/book/presagio-juan-de-onate/",
+      "https://ww3.lectulandia.co/book/el-infierno-de-cristal/"
+    ],
+    "titulos_relevantes": [
+      "A la sombra de la tormenta",
+      "La educación de las mariposas",
+      "Presagio",
+      "El infierno de cristal"
+    ],
+    "tipo": "lexica",
+    "nota": "Fuego + hallazgo de cadaver."
+  }
+]

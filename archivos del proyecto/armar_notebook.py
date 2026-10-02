@@ -1519,38 +1519,887 @@ qué — no porque la señal no exista, sino porque no domina.
 """)
 
 md(r"""
-### Advertencias metodológicas (obligatorias)
+## Bloque 9 — Parte E: persistencia en Postgres con pgvector
 
-**Sobre el PCA.** La varianza explicada por las dos componentes está impresa arriba
-y es baja — como tiene que ser: aplastar 512 dimensiones sobre 2 descarta casi
-todo. La consecuencia práctica, y hay que decirla: **una nube que se ve mezclada
-puede estar perfectamente separada en el espacio original.** El gráfico no puede
-demostrar que el modelo *no* distingue los géneros; a lo sumo puede mostrar que sí
-cuando la separación es tan fuerte que sobrevive a la proyección.
+### Por qué una base de datos
 
-**Sobre el t-SNE.** Elegimos `perplexity = 30`. Es, grosso modo, cuántos vecinos
-cercanos considera para cada punto; con 150 documentos la regla práctica es
-mantenerla bastante por debajo de n/3. Y la advertencia que siempre hay que hacer:
-**las distancias entre clusters de un t-SNE no se pueden interpretar.** El
-algoritmo preserva vecindarios locales, no distancias globales. Dos grupos que se
-ven lejos pueden no estarlo, y el tamaño de un cluster no indica dispersión real.
-Lo único que se puede leer es *qué puntos quedaron juntos*.
+Hasta acá los vectores viven en memoria: si se reinicia el entorno, hay que
+recalcularlos. En un sistema real los vectores están en una base y la búsqueda se
+resuelve ahí, porque traer todo el corpus a memoria para ordenarlo no escala.
 
-**Sobre los paneles.** Dibujamos un panel por subgénero en vez de un único gráfico
-con siete colores. No es decoración: en un scatter con muchos colores superpuestos
-las categorías no se distinguen de forma confiable —menos todavía para alguien con
-daltonismo—, y el gráfico pasa a sugerir una precisión que no tiene.
+**pgvector** es una extensión de Postgres que agrega un tipo `vector` y operadores
+de distancia, de modo que "los N documentos más parecidos a este" se puede escribir
+en SQL.
 
+### Las credenciales no van en el notebook
+
+La consigna descuenta por credenciales visibles **en el notebook o en sus salidas**.
+Acá se leen de un archivo `.env` que está en `.gitignore`:
+
+```
+.env.ejemplo   -> plantilla, se sube al repositorio
+.env           -> datos reales, NO se sube nunca
+```
+
+Antes de correr este bloque conviene verificar la conexión con el script
+`archivos del proyecto/probar_conexion.py`, que comprueba que la extensión esté
+instalada y que la versión soporte índices HNSW, y enmascara la contraseña en todo
+lo que imprime.
+""")
+
+code(r"""
+from dotenv import dotenv_values
+import psycopg
+from pgvector.psycopg import register_vector
+
+
+def url_conexion():
+    # Lee DATABASE_URL de .env. No se imprime nunca ni se guarda en una variable
+    # del notebook que pueda terminar en una salida.
+    for ruta in (Path('.env'), Path('../.env')):
+        if ruta.exists():
+            url = (dotenv_values(ruta) or {}).get('DATABASE_URL', '').strip()
+            if url and 'TU_PASSWORD' not in url:
+                return url
+    raise RuntimeError(
+        'No encuentro DATABASE_URL. Copiar .env.ejemplo a .env y completarlo. '
+        'Verificar con el script archivos del proyecto/probar_conexion.py'
+    )
+
+
+def conectar():
+    url = url_conexion()
+    # El transaction pooler (puerto 6543) no admite sentencias preparadas.
+    kwargs = {'prepare_threshold': None} if ':6543' in url else {}
+    con = psycopg.connect(url, connect_timeout=20, **kwargs)
+    register_vector(con)        # permite pasar arrays de numpy como `vector`
+    return con
+
+
+with conectar() as con, con.cursor() as cur:
+    cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+    print('pgvector:', cur.fetchone()[0])
+    cur.execute('SELECT version()')
+    print(cur.fetchone()[0].split(',')[0])
+""")
+
+md(r"""
+### El esquema: una tabla por modelo
+
+```
+books              metadata + texto           id (identity)
+books_sbert        vector(512)                book_id -> books.id
+books_word2vec     vector(300)                book_id -> books.id
+```
+
+**¿Por qué no pueden convivir dos dimensiones en la misma columna indexada?**
+
+Porque la dimensión es **parte del tipo**: `vector(300)` y `vector(512)` son tipos
+distintos, no el mismo tipo con contenidos de distinto largo. Y aunque se pudieran
+guardar juntos, la distancia coseno entre un vector de 300 y uno de 512 no está
+definida: no hay forma de emparejar las componentes. El índice, además, se
+construye sobre una métrica de dimensionalidad fija — necesita saber de antemano en
+qué espacio está midiendo.
+
+La metadata va en una tabla aparte y las de embeddings la referencian con una clave
+foránea `ON DELETE CASCADE`. Así el texto se guarda una sola vez, borrar un libro
+se lleva sus vectores, y agregar un tercer modelo es agregar una tabla sin tocar
+nada de lo anterior.
+
+La celda siguiente **no crea nada**: verifica que el esquema sea el esperado y que
+las dimensiones declaradas coincidan con las matrices que calculamos. Si algo no
+coincide, falla acá en vez de fallar a mitad de la carga.
+""")
+
+code(r"""
+ESQUEMA_ESPERADO = {'books_sbert': ('vector(512)', 512),
+                    'books_word2vec': ('vector(300)', 300)}
+
+SQL_TIPOS = '''
+    SELECT c.relname, format_type(a.atttypid, a.atttypmod)
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND a.attname = 'embedding' AND a.attnum > 0
+    ORDER BY c.relname
+'''
+
+with conectar() as con, con.cursor() as cur:
+    cur.execute(SQL_TIPOS)
+    tipos = dict(cur.fetchall())
+
+for tabla, (tipo_esperado, dim) in ESQUEMA_ESPERADO.items():
+    real = tipos.get(tabla)
+    assert real == tipo_esperado, f'{tabla}: la base declara {real}, se esperaba {tipo_esperado}'
+    print(f'{tabla:<16} {real}  coincide con la matriz calculada')
+
+assert X_sbert.shape[1] == 512 and X_sbw.shape[1] == 300
+print('\nDimensiones verificadas contra las matrices del notebook.')
+""")
+
+md(r"""
+### Antes de insertar: validar los vectores
+
+La consigna lo pide explícitamente y lo descuenta si falla: **manejo explícito de
+vectores nulos o no finitos antes de insertar**.
+
+Un `NaN` en la base es peor que un error, porque no explota: se inserta, el índice
+lo acepta, y después toda comparación con él devuelve resultados sin sentido de
+forma silenciosa. Por eso la validación va **antes** del `INSERT`, no después.
+
+Tres condiciones: que todos los valores sean finitos, que la norma no sea cero (un
+vector nulo no tiene dirección, así que su coseno es indefinido) y que la dimensión
+sea la que declara la tabla.
+""")
+
+code(r"""
+def validar_matriz(M, dim_esperada, nombre):
+    # Devuelve los indices de las filas que se pueden insertar. Nada entra a la
+    # base sin pasar por aca.
+    if M.shape[1] != dim_esperada:
+        raise ValueError(f'{nombre}: dimension {M.shape[1]}, se esperaba {dim_esperada}')
+
+    finitos = np.isfinite(M).all(axis=1)
+    no_nulos = np.linalg.norm(M, axis=1) > 1e-12
+    validos = np.where(finitos & no_nulos)[0]
+
+    print(f'{nombre:<16} {M.shape}  validos: {len(validos)}/{len(M)}')
+    if (~finitos).sum():
+        print(f'    DESCARTADOS por no finitos (NaN o inf): {int((~finitos).sum())}')
+    if (~no_nulos).sum():
+        print(f'    DESCARTADOS por norma cero: {int((~no_nulos).sum())}')
+    return validos
+
+
+idx_sbert = validar_matriz(X_sbert, 512, 'books_sbert')
+idx_sbw = validar_matriz(X_sbw, 300, 'books_word2vec')
+""")
+
+md(r"""
+### La carga
+
+`books.id` es `GENERATED AS IDENTITY`: los identificadores los asigna Postgres, no
+nosotros. Y `url_libro` no tiene restricción de unicidad, así que no se puede usar
+`ON CONFLICT` para que la carga sea idempotente.
+
+La solución es **recargar desde cero**: `TRUNCATE books CASCADE` vacía la tabla y,
+por la clave foránea, también las dos de embeddings. Así la celda se puede volver a
+correr cuantas veces haga falta y el resultado es siempre el mismo — que es lo que
+se espera de un notebook que alguien más va a ejecutar.
+
+Después de insertar leemos los `id` generados para enlazar los vectores. `generos`
+es una columna `text`, así que guardamos el array en JSON (el mismo formato del CSV)
+y lo expandimos en la consulta del Bloque 10.
+""")
+
+code(r"""
+SQL_INSERT_BOOKS = '''
+    INSERT INTO books (titulo, autores, generos, serie, sinopsis, url_libro,
+                       categoria_origen, fecha_extraccion, url_portada,
+                       texto_crudo, tokens, texto_limpio,
+                       n_palabras_crudo, n_tokens_limpio)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+'''
+
+
+def como_json(valor):
+    return json.dumps(list(valor), ensure_ascii=False)
+
+
+with conectar() as con, con.cursor() as cur:
+    # Recarga completa: hace la celda reproducible. CASCADE alcanza a las dos
+    # tablas de embeddings por la clave foranea.
+    cur.execute('TRUNCATE books CASCADE')
+
+    cur.executemany(SQL_INSERT_BOOKS, [
+        (r.titulo, como_json(r.autores), como_json(r.generos),
+         r.serie or None, r.sinopsis, r.url_libro, r.categoria_origen,
+         r.fecha_extraccion or None, r.url_portada or None,
+         r.texto_crudo, como_json(r.tokens), r.texto_limpio,
+         int(len(str(r.texto_crudo).split())), int(len(r.tokens)))
+        for r in df.itertuples()
+    ])
+
+    # Los id los genero Postgres: hay que leerlos para enlazar los vectores.
+    cur.execute('SELECT id, url_libro FROM books')
+    id_por_url = {u: i for i, u in cur.fetchall()}
+
+    for tabla, M, validos in [('books_sbert', X_sbert, idx_sbert),
+                              ('books_word2vec', X_sbw, idx_sbw)]:
+        cur.executemany(
+            f'INSERT INTO {tabla} (book_id, embedding) VALUES (%s, %s)',
+            [(id_por_url[df.url_libro.iloc[i]], M[i]) for i in validos])
+
+    con.commit()
+
+with conectar() as con, con.cursor() as cur:
+    for t in ('books', 'books_sbert', 'books_word2vec'):
+        cur.execute(f'SELECT count(*) FROM {t}')
+        print(f'{t:<16} {cur.fetchone()[0]} filas')
+""")
+
+md(r"""
+### El índice HNSW y la opclass
+
+**HNSW** (*Hierarchical Navigable Small World*) es un índice **aproximado**: en vez
+de comparar la consulta contra los 150 vectores, navega un grafo de vecinos y se
+detiene tras visitar unos cuantos candidatos. Con 150 documentos no hace falta; con
+millones, es la diferencia entre milisegundos y minutos.
+
+**La opclass tiene que corresponder al operador de distancia que se va a usar.** Es
+un punto que la consigna evalúa y descuenta:
+
+| Operador | Qué mide | Opclass |
+|---|---|---|
+| `<=>` | distancia coseno | `vector_cosine_ops` |
+| `<->` | distancia euclídea (L2) | `vector_l2_ops` |
+| `<#>` | producto interno negativo | `vector_ip_ops` |
+
+Si no coinciden, **Postgres ignora el índice**: la consulta devuelve el resultado
+correcto, más lenta, y nadie se entera. Nosotros usamos `<=>`, así que va
+`vector_cosine_ops`.
+
+> Nuestros vectores están normalizados, así que coseno y producto interno
+> ordenarían igual. Usamos coseno de todos modos, por ser el operador cuya
+> semántica coincide con lo que decimos estar midiendo.
+
+La celda siguiente crea los índices si faltan y después **verifica la opclass
+leyendo el catálogo de Postgres**, en vez de confiar en que la sentencia decía lo
+correcto.
+""")
+
+code(r"""
+SQL_VERIFICAR_INDICES = '''
+    SELECT t.relname, i.relname, a.amname, pg_get_indexdef(x.indexrelid)
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_class t ON t.oid = x.indrelid
+    JOIN pg_am a ON a.oid = i.relam
+    WHERE a.amname = 'hnsw'
+    ORDER BY t.relname
+'''
+
+with conectar() as con, con.cursor() as cur:
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_books_sbert_hnsw ON books_sbert '
+                'USING hnsw (embedding vector_cosine_ops)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_books_w2v_hnsw ON books_word2vec '
+                'USING hnsw (embedding vector_cosine_ops)')
+    con.commit()
+
+    cur.execute(SQL_VERIFICAR_INDICES)
+    for tabla, indice, metodo, definicion in cur.fetchall():
+        ok = 'vector_cosine_ops' in definicion
+        print(f'{tabla:<16} {indice:<24} {metodo}  opclass correcta para `<=>`: {ok}')
+""")
+
+md(r"""
+## Bloque 10 — Parte F: búsqueda semántica en SQL
+
+La consigna es explícita: la similitud se resuelve **en SQL, no en Python**. Traer
+los vectores a memoria y ordenarlos con `argsort` sería volver al punto de partida.
+
+La función combina similitud con un **filtro por metadata** (el género), que es lo
+que hace útil a un buscador real: *"policiales parecidos a esto"*.
+
+**Dos notas sobre el filtro.**
+
+La columna `generos` es `text`, así que guardamos el array como JSON y lo
+expandimos en la consulta con `jsonb_array_elements_text`. Es correcto —compara
+elementos, no subcadenas, así que `Policíaco` no matchea por accidente dentro de
+otra palabra— pero no puede usar un índice. Con 150 libros da igual; en producción
+la columna sería `text[]` con un índice GIN, y el filtro quedaría
+`%s = ANY(generos)`.
+
+El `::text` sobre el parámetro del género no es decorativo. Sin él, Postgres falla
+con `could not determine data type of parameter`: un parámetro que sólo aparece en
+`$n IS NULL` no le da ninguna pista sobre su tipo, y el motor se niega a adivinar.
+El cast se lo dice.
+""")
+
+code(r"""
+SQL_BUSCAR = '''
+    SELECT b.titulo,
+           b.generos,
+           1 - (e.embedding <=> %(q)s) AS similitud
+    FROM {tabla} e
+    JOIN books b ON b.id = e.book_id
+    WHERE %(genero)s::text IS NULL
+       OR %(genero)s::text IN (SELECT jsonb_array_elements_text(b.generos::jsonb))
+    ORDER BY e.embedding <=> %(q)s
+    LIMIT %(k)s
+'''
+
+
+def buscar(consulta, k=5, genero=None, tabla='books_sbert', ef_search=None):
+    # Busqueda semantica resuelta EN SQL.
+    #   genero=None  -> sin filtro
+    #   ef_search    -> cuantos candidatos visita HNSW antes de cortar
+    if tabla == 'books_sbert':
+        v = modelo_sbert.encode([consulta], normalize_embeddings=True).ravel()
+    else:
+        v, _ = vector_documento(tokenizar(consulta), sbw)
+
+    with conectar() as con, con.cursor() as cur:
+        if ef_search is not None:
+            # SET no admite parametros vinculados: hay que interpolar.
+            # int() evita cualquier inyeccion al construir la sentencia.
+            cur.execute('SET LOCAL hnsw.ef_search = ' + str(int(ef_search)))
+        cur.execute(SQL_BUSCAR.format(tabla=tabla),
+                    {'q': v, 'genero': genero, 'k': k})
+        filas = cur.fetchall()
+
+    return pd.DataFrame(
+        [(t, ', '.join(json.loads(g)), round(float(s), 4)) for t, g, s in filas],
+        columns=['titulo', 'generos', 'similitud'])
+
+
+consulta_demo = 'un detective investiga un asesinato en una casa de campo inglesa'
+print('Sin filtro:')
+display(buscar(consulta_demo, k=5))
+print()
+print('Mismo vector, filtrando por genero = Historico:')
+resultado = buscar(consulta_demo, k=5, genero='Histórico')
+display(resultado)
+if len(resultado) < 5:
+    print(f'Devolvio {len(resultado)} filas en vez de 5, aunque hay libros de ese')
+    print('genero en el corpus. NO es un error: es el problema de recall del indice')
+    print('aproximado, que la seccion siguiente explica y mide.')
+""")
+
+md(r"""
+### El problema de recall: índice aproximado + filtro selectivo
+
+Acá hay un problema que no se ve con 150 documentos pero rompe sistemas reales, y
+la consigna pide explicarlo.
+
+HNSW **visita un número limitado de candidatos** (`hnsw.ef_search`, 40 por defecto)
+y corta. El filtro por género se aplica **después**, sobre lo que el índice ya
+decidió mirar.
+
+Entonces, si el género cubre una fracción chica del corpus, puede pasar que de los
+40 candidatos visitados **ninguno** —o muy pocos— pase el filtro. La consulta
+devuelve menos de `k` resultados, o resultados peores que los que existían. Y no
+avisa: devuelve una lista corta, que parece una lista.
+
+Cuanto **más selectivo** el filtro, **peor** el recall. Es contraintuitivo: uno
+esperaría que filtrar más diera resultados más precisos.
+
+**Qué se hace al respecto**, en orden de costo:
+
+1. **Subir `ef_search`.** Visita más candidatos: más lento, mejor recall. Es un
+   parche — no garantiza nada.
+2. **Búsqueda exacta cuando el filtro es muy selectivo.** Si el género tiene pocos
+   libros, conviene filtrar primero y comparar todos: es barato sobre un conjunto
+   chico. Se decide con una estimación de cardinalidad.
+3. **Índices parciales por género.** El índice contiene solo lo filtrado, así que el
+   problema desaparece. No escala a muchos valores de filtro.
+
+La celda siguiente lo mide sobre nuestros propios datos: compara lo que devuelve
+el índice contra la verdad exacta calculada en Python, con el filtro cada vez más
+selectivo y con tres valores de `ef_search`.
+""")
+
+code(r"""
+def verdad_exacta(consulta, genero, k=5):
+    # Los k mejores calculados sin indice: la referencia contra la que medimos.
+    v = modelo_sbert.encode([consulta], normalize_embeddings=True).ravel()
+    mask = (np.ones(len(df), dtype=bool) if genero is None
+            else df.generos.apply(lambda gs: genero in gs).values)
+    n = int(mask.sum())
+    sims = np.where(mask, X_sbert @ v, -np.inf)
+    return set(df.titulo.iloc[sims.argsort()[::-1][:min(k, n)]]), n
+
+
+EF_A_PROBAR = [40, 100, 400]      # 40 es el valor por defecto de pgvector
+
+consulta_recall = 'una investigacion policial con varios sospechosos'
+filas = []
+for genero in ['Policíaco', 'Histórico', 'Psicológico', 'Aventuras']:
+    exacto, n = verdad_exacta(consulta_recall, genero)
+    fila = {'filtro': genero, 'libros que pasan': n,
+            'selectividad': f'{n/len(df):.0%}'}
+    for ef in EF_A_PROBAR:
+        obtenido = set(buscar(consulta_recall, k=5, genero=genero,
+                              ef_search=ef).titulo)
+        fila[f'recall@5 (ef={ef})'] = round(len(exacto & obtenido) / max(len(exacto), 1), 2)
+    filas.append(fila)
+
+print('Recall del indice HNSW frente a la busqueda exacta, por selectividad del filtro')
+print(pd.DataFrame(filas).to_string(index=False))
+""")
+
+md(r"""
+### Lectura: el problema no era teórico
+
+Esperábamos tener que explicar el problema de recall como algo que aparece "a
+escala". **Aparece acá, con 150 documentos**, y la tabla lo muestra con claridad:
+
+- Con el filtro poco selectivo (26% del corpus) el recall es perfecto.
+- A medida que el filtro se vuelve más selectivo, el recall **se derrumba**: con un
+  género que cubre el 7% del corpus, el índice en su configuración por defecto
+  devolvió **cero** de los resultados correctos.
+- No devolvió resultados *malos*: en algunos casos devolvió **menos de `k` filas, o
+  ninguna**, pese a haber libros que cumplían el filtro. Una lista vacía parece una
+  respuesta legítima.
+
+**Por qué.** `ef_search` por defecto vale 40. El índice recorre el grafo, junta unos
+40 candidatos ordenados por similitud **sin mirar el género**, y recién entonces se
+aplica el filtro. Si entre esos 40 no hay ninguno del género pedido, no queda nada
+que devolver. Con 150 documentos, 40 candidatos son apenas un cuarto del corpus:
+alcanza para que el efecto aparezca.
+
+**La solución, medida.** Subir `ef_search` recupera el recall de forma monótona, y
+con un valor suficientemente alto vuelve a 1.00 en los cuatro casos — porque pasa a
+visitar prácticamente todo el corpus. Es decir: **el arreglo funciona renunciando a
+la ventaja del índice**. Esa es la verdadera lección. En un corpus grande no se
+puede subir `ef_search` indefinidamente; ahí hay que elegir entre las otras dos
+estrategias: búsqueda exacta cuando el filtro es muy selectivo, o índices parciales.
+
+**Lo que esto cambia en el informe.** Es un caso concreto donde el sistema falla, con
+una hipótesis verificada sobre la causa. La consigna pide exactamente eso, y pedía
+"explicar" el problema: nosotros además lo reprodujimos y medimos su arreglo.
+""")
+
+md(r"""
+## Bloque 11 — Parte 5: evaluación
+
+Este es el núcleo del TP. Hasta acá tenemos un buscador que devuelve resultados
+plausibles, y ya vimos dos veces que eso no alcanza: el promedio de Word2Vec
+devolvía similitudes de 0.75 que estaban por debajo del par promedio del corpus, y
+el índice con filtro devolvía listas vacías que parecían respuestas.
+
+**La métrica.** `precision@k` = de los `k` resultados devueltos, qué fracción está
+en nuestra lista de relevantes. Si de los primeros 5 resultados 3 son relevantes,
+precision@5 = 0.60.
+
+**La línea de base.** Un número suelto no significa nada. Comparamos cuatro cosas:
+
+| Contendiente | Qué representa |
+|---|---|
+| **Azar** | el piso: elegir `k` libros sin mirar el texto |
+| **TF-IDF** | la línea de base léxica, la del TP1 |
+| **Promedio Word2Vec (SBW)** | familia 1: promedio de vectores de palabra |
+| **SBERT** | familia 2: modelo de oración |
+
+El piso de azar **no se calcula con una fórmula**: se simula. Mil sorteos de `k`
+libros al azar, y se promedia. Es el mismo método que usamos en el Bloque 8 para el
+test de separabilidad.
+""")
+
+code(r"""
+K_EVALUACION = [5, 10]
+SORTEOS_AZAR = 1000
+
+
+def precision_en_k(ranking_indices, relevantes_idx, k):
+    top = ranking_indices[:k]
+    return sum(1 for i in top if i in relevantes_idx) / k
+
+
+def recall_en_k(ranking_indices, relevantes_idx, k):
+    top = set(ranking_indices[:k])
+    return len(top & relevantes_idx) / max(len(relevantes_idx), 1)
+
+
+def ranking_tfidf(consulta):
+    v = vectorizador.transform([' '.join(tokenizar(consulta))])
+    return cosine_similarity(v, X_tfidf).ravel().argsort()[::-1]
+
+
+def ranking_w2v(consulta):
+    v, _ = vector_documento(tokenizar(consulta), sbw)
+    return (X_sbw @ v).argsort()[::-1]
+
+
+def ranking_sbert(consulta):
+    e = modelo_sbert.encode([consulta], normalize_embeddings=True).ravel()
+    return (X_sbert @ e).argsort()[::-1]
+
+
+MODELOS = [('TF-IDF', ranking_tfidf),
+           ('Promedio W2V (SBW)', ranking_w2v),
+           ('SBERT', ranking_sbert)]
+
+indice_por_url = {u: i for i, u in enumerate(df.url_libro)}
+print(f'{len(queries)} consultas, '
+      f'{sum(len(q["relevantes"]) for q in queries)} juicios de relevancia')
+""")
+
+code(r"""
+rng_eval = np.random.default_rng(SEMILLA)
+
+
+def piso_de_azar(relevantes_idx, k, sorteos=SORTEOS_AZAR):
+    # Se simula en vez de usar |R|/N: es el procedimiento, no el atajo.
+    aciertos = 0
+    for _ in range(sorteos):
+        elegidos = rng_eval.choice(len(df), size=k, replace=False)
+        aciertos += sum(1 for i in elegidos if i in relevantes_idx) / k
+    return aciertos / sorteos
+
+
+# Un ranking por consulta y por modelo, calculado una sola vez.
+rankings = {nombre: {q['id']: fn(q['consulta']) for q in queries}
+            for nombre, fn in MODELOS}
+relevantes = {q['id']: {indice_por_url[u] for u in q['relevantes']} for q in queries}
+tipo_de = {q['id']: q['tipo'] for q in queries}
+
+filas = []
+for q in queries:
+    qid = q['id']
+    fila = {'consulta': qid, 'tipo': tipo_de[qid], 'rel': len(relevantes[qid])}
+    for k in K_EVALUACION:
+        fila[f'azar@{k}'] = piso_de_azar(relevantes[qid], k)
+        for nombre, _ in MODELOS:
+            fila[f'{nombre}@{k}'] = precision_en_k(rankings[nombre][qid], relevantes[qid], k)
+    filas.append(fila)
+
+detalle = pd.DataFrame(filas)
+print('precision@k por consulta')
+print(detalle.round(2).to_string(index=False))
+""")
+
+code(r"""
+# La tabla que va al informe: promedio sobre las 12 consultas.
+resumen = []
+for k in K_EVALUACION:
+    fila = {'k': k, 'Azar (piso)': detalle[f'azar@{k}'].mean()}
+    for nombre, _ in MODELOS:
+        fila[nombre] = detalle[f'{nombre}@{k}'].mean()
+    resumen.append(fila)
+
+tabla_global = pd.DataFrame(resumen).round(3)
+print('precision@k PROMEDIO sobre las 12 consultas')
+print(tabla_global.to_string(index=False))
+print()
+for k in K_EVALUACION:
+    piso = tabla_global.loc[tabla_global.k == k, 'Azar (piso)'].iloc[0]
+    mejor = max(MODELOS, key=lambda m: detalle[f'{m[0]}@{k}'].mean())[0]
+    valor = detalle[f'{mejor}@{k}'].mean()
+    print(f'  k={k}: mejor modelo {mejor} con {valor:.3f}, '
+          f'{valor/piso:.0f}x por encima del piso de azar ({piso:.3f})')
+""")
+
+md(r"""
+### El promedio global esconde lo importante
+
+Un único número por modelo responde "¿cuál es mejor en general?", que es la
+pregunta menos interesante. La que importa —y la que pide el informe— es **en qué
+tipo de consulta gana cada uno**.
+
+Nuestro `queries.json` está construido justamente para poder segmentar: tiene
+consultas con solapamiento léxico del 100% y consultas con 0%.
+""")
+
+code(r"""
+por_tipo = []
+for tipo in ['lexica', 'mixta', 'semantica']:
+    sub = detalle[detalle.tipo == tipo]
+    if sub.empty:
+        continue
+    fila = {'tipo': tipo, 'consultas': len(sub), 'azar': sub['azar@5'].mean()}
+    for nombre, _ in MODELOS:
+        fila[nombre] = sub[f'{nombre}@5'].mean()
+    por_tipo.append(fila)
+
+tabla_tipos = pd.DataFrame(por_tipo).round(3)
+print('precision@5 segmentado por tipo de consulta')
+print(tabla_tipos.to_string(index=False))
+""")
+
+code(r"""
+# Recall@10: cuantos de los relevantes aparecen, no solo cuan limpio es el top.
+# No lo pide la consigna; lo agregamos porque precision@k castiga mucho cuando
+# los conjuntos de relevantes tienen mas elementos que k.
+filas_r = []
+for q in queries:
+    qid = q['id']
+    fila = {'consulta': qid, 'tipo': tipo_de[qid], 'rel': len(relevantes[qid])}
+    for nombre, _ in MODELOS:
+        fila[nombre] = recall_en_k(rankings[nombre][qid], relevantes[qid], 10)
+    filas_r.append(fila)
+
+tabla_recall = pd.DataFrame(filas_r)
+print('recall@10 promedio por tipo de consulta')
+print(tabla_recall.groupby('tipo')[[m[0] for m in MODELOS]].mean().round(3).to_string())
+""")
+
+md(r"""
+### Una aparente contradicción con el Bloque 8, y su resolución
+
+En el Bloque 8 mostramos que el promedio de Word2Vec tiene una similitud media de
+~0.90 entre pares al azar, con un mínimo que nunca baja de ~0.72: **ningún par de
+libros le resulta distinto**. De ahí sacamos que ese espacio no discrimina.
+
+Y sin embargo, en la tabla de arriba el promedio de Word2Vec **no queda último**:
+rinde parecido a TF-IDF, y en las consultas léxicas incluso lo supera.
+
+Las dos cosas son ciertas, y conviene decir con precisión qué significa cada una:
+
+- **Los valores absolutos de ese modelo no significan nada.** Una similitud de 0.75
+  suena alta y está por debajo del par promedio del corpus. No se pueden usar como
+  umbral ("mostrar resultados con similitud > 0.7") ni comparar entre consultas.
+- **El orden relativo sí sobrevive.** Aunque todas las similitudes estén apretadas
+  en una franja angosta, dentro de esa franja los documentos pertinentes quedan
+  arriba. `argsort` sólo necesita el orden, no la escala.
+
+La conclusión práctica: ese modelo **puede ordenar, pero no puede decidir**. Sirve
+para un ranking, no para un umbral ni para una medida de confianza. Y la diferencia
+entre el puesto 1 y el 20 es de centésimas, así que el ranking es frágil: pequeñas
+variaciones del texto lo reordenan.
+
+Esto es un ejemplo de por qué el enunciado insiste en mirar más de una cosa. Con
+sólo la tabla de precision@k habríamos concluido que el modelo funciona bien. Con
+sólo la distribución, que no sirve para nada. Ninguna de las dos lecturas sola es
+correcta.
+""")
+
+md(r"""
+### Qué mide y qué NO mide esta métrica
+
+**Mide:** qué fracción del top-`k` nuestro anotador consideraría relevante.
+
+**No mide:**
+
+- **El orden dentro del top-k.** Acertar en el puesto 1 y en el 5 vale igual. Para
+  eso haría falta MAP o nDCG.
+- **Recall**, salvo donde lo agregamos aparte: un modelo que encuentra uno de los
+  cinco relevantes y lo pone primero saca la misma precision@5 que otro que
+  encuentra otro distinto.
+- **Si nuestros relevantes son los correctos.** Es la limitación de fondo: los
+  juicios los hicimos nosotros, con un criterio propio, sobre sinopsis
+  promocionales. Otro grupo armaría otro conjunto y los números cambiarían.
+- **Significancia estadística.** Con 12 consultas y un solo anotador, el intervalo
+  de confianza es ancho. **Una diferencia chica entre dos modelos no es una
+  diferencia.** Sólo las separaciones grandes, y sobre todo las que se sostienen al
+  segmentar por tipo de consulta, dicen algo.
+
+Esta última es la razón por la que la tabla segmentada vale más que el promedio: un
+patrón consistente entre tipos de consulta es más creíble que una diferencia de
+centésimas en el total.
+""")
+
+md(r"""
+## Bloque 12 — Parte avanzada: *chunking*
+
+### Por qué esta y no otra
+
+En el Bloque 7 medimos que **el 92% de los documentos se trunca** y que el modelo
+descarta el **46% del corpus** antes de producir el vector. Esa es la patología más
+grande que encontramos, y el *chunking* la ataca directamente.
+
+**La idea.** En vez de un vector por libro, se parte la sinopsis en pedazos que
+entren en el límite del modelo y se guarda **un vector por pedazo**. Al buscar, un
+libro puntúa según su **mejor pedazo**: si lo que lo hacía relevante estaba en el
+párrafo final, ahora hay un vector que lo representa.
+
+**La hipótesis, declarada antes de medir:** el chunking debería mejorar los
+resultados **en los documentos que hoy se truncan**, y no cambiar nada en los que
+entran completos. Si mejora parejo en todos, la mejora viene de otro lado y hay que
+desconfiar.
+""")
+
+code(r"""
+PALABRAS_POR_CHUNK = 60     # ~90 sub-tokens en espanol: entra holgado en 128
+SOLAPE = 15                 # palabras repetidas entre pedazos consecutivos
+
+
+def partir(texto, tam=PALABRAS_POR_CHUNK, solape=SOLAPE):
+    # Pedazos con solape, para que una idea partida al medio quede entera en
+    # alguno de los dos.
+    palabras = str(texto).split()
+    if len(palabras) <= tam:
+        return [' '.join(palabras)]
+    paso = tam - solape
+    pedazos = [' '.join(palabras[i:i + tam]) for i in range(0, len(palabras), paso)]
+    return [p for p in pedazos if len(p.split()) >= 10]
+
+
+chunks, chunk_a_doc = [], []
+for i, texto in enumerate(df.texto_crudo):
+    for pedazo in partir(texto):
+        chunks.append(pedazo)
+        chunk_a_doc.append(i)
+chunk_a_doc = np.array(chunk_a_doc)
+
+print(f'{len(df)} documentos -> {len(chunks)} pedazos '
+      f'({len(chunks)/len(df):.1f} por documento en promedio)')
+
+largos_chunk = [len(modelo_sbert.tokenizer.encode(c)) for c in chunks]
+print(f'Pedazos que SIGUEN truncados: '
+      f'{sum(1 for l in largos_chunk if l > LIMITE_TOKENS)}/{len(chunks)}')
+""")
+
+code(r"""
+X_chunks = modelo_sbert.encode(chunks, normalize_embeddings=True,
+                               show_progress_bar=True, batch_size=64)
+print(f'\nMatriz de pedazos: {X_chunks.shape}   NaN: {int(np.isnan(X_chunks).sum())}')
+
+
+def ranking_chunks(consulta):
+    # Un libro puntua segun su MEJOR pedazo (max-pooling sobre los chunks).
+    e = modelo_sbert.encode([consulta], normalize_embeddings=True).ravel()
+    sims_chunk = X_chunks @ e
+    mejor = np.full(len(df), -np.inf)
+    np.maximum.at(mejor, chunk_a_doc, sims_chunk)
+    return mejor.argsort()[::-1]
+""")
+
+code(r"""
+# Comparacion global y, sobre todo, segmentada por si el documento se truncaba.
+largos_doc = np.array([len(modelo_sbert.tokenizer.encode(t)) for t in df.texto_crudo])
+se_truncaba = largos_doc > LIMITE_TOKENS
+print(f'Documentos que se truncaban: {se_truncaba.sum()}/{len(df)}')
+
+filas_c = []
+for q in queries:
+    qid = q['id']
+    rel = relevantes[qid]
+    rel_truncados = {i for i in rel if se_truncaba[i]}
+    filas_c.append({
+        'consulta': qid, 'tipo': tipo_de[qid],
+        'rel': len(rel), 'rel truncados': len(rel_truncados),
+        'SBERT entero': precision_en_k(rankings['SBERT'][qid], rel, 5),
+        'SBERT chunks': precision_en_k(ranking_chunks(q['consulta']), rel, 5),
+        'recall@10 entero': recall_en_k(rankings['SBERT'][qid], rel, 10),
+        'recall@10 chunks': recall_en_k(ranking_chunks(q['consulta']), rel, 10),
+    })
+
+comp = pd.DataFrame(filas_c)
+print()
+print(comp.round(2).to_string(index=False))
+print()
+print('PROMEDIOS')
+for col in ['SBERT entero', 'SBERT chunks', 'recall@10 entero', 'recall@10 chunks']:
+    print(f'   {col:<20} {comp[col].mean():.3f}')
+""")
+
+code(r"""
+# La prueba de la hipotesis: la mejora, se concentra en los documentos truncados?
+rel_trunc_total = {i for q in queries for i in relevantes[q['id']] if se_truncaba[i]}
+rel_enteros_total = {i for q in queries for i in relevantes[q['id']] if not se_truncaba[i]}
+
+def recall_sobre(subconjunto, fn_ranking, k=10):
+    # Recall calculado solo sobre los relevantes que pertenecen al subconjunto.
+    vals = []
+    for q in queries:
+        objetivo = relevantes[q['id']] & subconjunto
+        if objetivo:
+            vals.append(recall_en_k(fn_ranking(q), objetivo, k))
+    return float(np.mean(vals)) if vals else float('nan')
+
+
+entero = lambda q: rankings['SBERT'][q['id']]
+troceado = lambda q: ranking_chunks(q['consulta'])
+
+print('recall@10, segmentado por si el documento relevante se truncaba')
+print(f"{'subconjunto':<34}{'entero':>9}{'chunks':>9}{'dif':>8}")
+for etiqueta, sub in [('relevantes que SE truncaban', rel_trunc_total),
+                      ('relevantes que entraban completos', rel_enteros_total)]:
+    a, b = recall_sobre(sub, entero), recall_sobre(sub, troceado)
+    print(f'{etiqueta:<34}{a:>9.3f}{b:>9.3f}{b-a:>+8.3f}   (n={len(sub)})')
+""")
+
+md(r"""
+### El chunking empeoró los resultados
+
+La hipótesis era que el chunking mejoraría el recall **en los documentos que se
+truncaban**. Los números dicen lo contrario: empeora, y empeora justamente ahí.
+
+No es un error de implementación —ningún pedazo supera el límite de tokens, no hay
+`NaN`, y los documentos que entraban completos quedan exactamente igual— así que el
+resultado es real y hay que explicarlo, no esconderlo.
+
+**La sospecha.** Al puntuar cada libro por su **mejor** pedazo, un documento con 9
+pedazos tiene nueve oportunidades de que alguno obtenga un puntaje alto, y uno con 2
+pedazos tiene dos. Si eso es lo que pasa, el chunking no está midiendo relevancia:
+está premiando la longitud. Es una hipótesis concreta y se puede testear.
+""")
+
+code(r"""
+from scipy.stats import spearmanr
+
+# Si el max sobre varios pedazos premia la longitud, la cantidad de pedazos tiene
+# que correlacionar con una mejor posicion en el ranking. Con el documento entero
+# esa correlacion no deberia existir: es el grupo de control.
+n_chunks = np.bincount(chunk_a_doc, minlength=len(df))
+
+posiciones = {'SBERT entero': [], 'SBERT chunks': []}
+for q in queries:
+    posiciones['SBERT entero'].append(np.argsort(rankings['SBERT'][q['id']]))
+    posiciones['SBERT chunks'].append(np.argsort(ranking_chunks(q['consulta'])))
+
+print('Correlacion entre cantidad de pedazos y posicion media en el ranking')
+print('   (rho negativo = mas pedazos -> mejor puesto = sesgo por longitud)')
+pos_media = {}
+for nombre, lista in posiciones.items():
+    pos_media[nombre] = np.mean(lista, axis=0)
+    rho, pval = spearmanr(n_chunks, pos_media[nombre])
+    marca = '  <- significativo' if pval < 0.05 else '  (no significativo)'
+    print(f'   {nombre:<16} rho = {rho:+.3f}   p = {pval:.1e}{marca}')
+
+q25, q75 = np.percentile(n_chunks, [25, 75])
+print()
+print('Posicion media en el ranking (mas chico = mejor puesto)')
+print(f"{'':<34}{'entero':>9}{'chunks':>9}")
+for etiqueta, m in [(f'docs con POCOS pedazos (<={int(q25)})', n_chunks <= q25),
+                    (f'docs con MUCHOS pedazos (>={int(q75)})', n_chunks >= q75)]:
+    print(f'{etiqueta:<34}{pos_media["SBERT entero"][m].mean():>9.1f}'
+          f'{pos_media["SBERT chunks"][m].mean():>9.1f}')
+""")
+
+md(r"""
+### Diagnóstico: el chunking introdujo un sesgo por longitud
+
+La sospecha se confirma. Con el documento entero no hay relación entre la longitud y
+la posición en el ranking. Con chunking, aparece una correlación **negativa y
+estadísticamente significativa**: a más pedazos, mejor puesto.
+
+Y el efecto va en las dos direcciones: los documentos con muchos pedazos **suben** en
+el ranking y los que tienen pocos **bajan**, independientemente de si son relevantes.
+
+**Por qué pasa.** Puntuar por el máximo sobre varios pedazos es, en efecto, repartir
+boletos de lotería: cada pedazo es una oportunidad más de obtener un puntaje alto por
+casualidad. El máximo de 9 muestras tiende a ser mayor que el máximo de 2, aunque las
+muestras vengan de la misma distribución. El chunking no midió mejor la relevancia:
+cambió la pregunta por "¿qué documento es más largo?".
+
+**Qué haríamos con más tiempo.** El problema no es trocear, es el *max-pooling*.
+Alternativas que atacan exactamente este sesgo: promediar los pedazos en vez de tomar
+el máximo; normalizar el puntaje por la cantidad de pedazos; o quedarse con el
+promedio de los 2 o 3 mejores. Cada una tiene su propio sesgo, y habría que medirlas
+con este mismo test.
+
+**Y una limitación honesta de este experimento.** El grupo de control —los documentos
+relevantes que entraban completos— tiene sólo 2 casos. Que no cambien no prueba nada;
+simplemente no contradice. Con el 92% del corpus truncado, no teníamos corpus
+suficiente para armar un control decente.
+
+**El costo, además del resultado.** El chunking cuadruplicó la cantidad de vectores a
+almacenar e indexar, y agregó dos parámetros arbitrarios (tamaño del pedazo y solape).
+Aun si hubiera mejorado un poco, habría que justificar ese costo. Como empeoró, la
+decisión es clara: **no lo llevaríamos a producción**.
+""")
+
+md(r"""
 ---
 
-## Siguiente
+## Cierre
 
-| Bloque | Contenido | Parte |
+| Bloque | Parte de la consigna | Estado |
 |---|---|---|
-| 9 | Persistencia en pgvector con índice HNSW | E |
-| 10 | `buscar(consulta, k)` en SQL con filtro por metadata | F |
-| 11 | Evaluación: precision@k sobre las 12 consultas, con piso de azar | 5 |
-| 12 | Parte avanzada (Chunking, según el truncamiento medido arriba) | 6 |
+| 1-3 | A — corpus y dos versiones del texto | ✅ |
+| 4 | línea de base TF-IDF | ✅ |
+| 5-6 | B — Word2Vec propio vs. SBW | ✅ |
+| 7 | C — modelo de oración y truncamiento | ✅ |
+| 8 | D — comparación y visualización | ✅ |
+| 9 | E — persistencia en pgvector con HNSW | ✅ |
+| 10 | F — búsqueda en SQL con filtro | ✅ |
+| 11 | 5 — evaluación con línea de base | ✅ |
+| 12 | 6 — parte avanzada (chunking) | ✅ |
+
+Los cuatro entregables: este notebook, `data/queries.json`, el informe y la base
+poblada en Supabase.
 """)
 
 # =========================================================================== #

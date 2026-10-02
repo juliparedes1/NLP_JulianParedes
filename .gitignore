@@ -25,3 +25,7 @@ data/SBW-*
 modelos/
 !modelos/LEEME.txt
 sbw_vectors.bin
+
+# Credenciales: la plantilla se sube, el archivo real NO
+.env
+
